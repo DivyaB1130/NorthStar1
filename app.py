@@ -12,53 +12,30 @@ from huggingface_hub import InferenceClient
 
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
-import kagglehub #importing static yelp dataset to test accuracy
-path = kagglehub.dataset_download("yelp-dataset/yelp-dataset")
-print("Path to dataset files:", path)
+def respond(message,history): #defining what happenes every time a user types a message and hits enter
+    system_instruction = (
+        "You are NorthStar*, a friendly AI travel guide specializing in food recommendations.\n"
+        "Ask the user for three things if they haven't provided them:\n"
+        "1) Where they are going (City/Location)\n"
+        "2) Their budget/price range ($, $$, or $$$)\n"
+        "3) The meal of the day (Breakfast, Brunch, Lunch, Dinner)\n\n"
+        "Structure your recommendations clearly with the restaurant name, why it fits their request, "
+        "and a tip on what to order."
+    )
+    #managing the conversation memory from lines 26-33
+    messages = [{"role","system","content": system_instruction}]
 
-def preprocess_text(text):
-  # Strip extra whitespace from the beginning and the end of the text
-  cleaned_text = text.strip()
-  # Split the cleaned_text by every newline character (\n)
-  chunks = cleaned_text.split("\n")
-  # Create an empty list to store cleaned chunks
-  cleaned_chunks = []
-  # Write your for-in loop below to clean each chunk and add it to the cleaned_chunks list
-  for chunk in chunks:
-    if chunk != ():
-      cleaned_chunks.append(chunk)
-  # Print cleaned_chunks
-  print(cleaned_chunks)
-  # Print the length of cleaned_chunks
-  print(len(cleaned_chunks))
-  # Return the cleaned_chunks
-  return cleaned_chunks
-
-# Call the preprocess_text function and store the result in a cleaned_chunks variable
-cleaned_chunks = preprocess_text(path)
-def testing():
-    print(path.head())
-
-
-def respond(message, history):
-    messages = [{"role": "system", "content": "You are a friendly chatbot."}]
-
-    if history:
+    #include past conversation logs
+    if histroy:
         messages.extend(history)
 
-    messages.append({"role": "user", "content": message})
-
-    response = client.chat_completion(
-        messages,
-        max_tokens=100, temperature=1.3
-    )
-
+    #include the current user message
+    messages.append({"role":"user","content":message})
+    
+    #get the answer and launching the app
+    response = client.chat_completion(messages, max_tokens=200, temperature=0.8)
     return response.choices[0].message.content.strip()
 
-chatbot = gr.ChatInterface(respond, testing)
-
+chatbot = gr.ChatInterface(respond)
 chatbot.launch()
 
-
-# TODO: This is just a starting point! Customize the system prompt,
-# the model, and the interface to make this project your own!
