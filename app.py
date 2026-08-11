@@ -23,7 +23,7 @@ def respond(message,history): #defining what happenes every time a user types a 
         "and a tip on what to order."
     )
     #managing the conversation memory from lines 26-33
-    messages = [{"role","system","content": system_instruction}]
+    messages = [{"role":"system","content": system_instruction}]
 
     #include past conversation logs
     if histroy:
