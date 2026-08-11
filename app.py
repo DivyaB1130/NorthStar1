@@ -26,7 +26,7 @@ def respond(message,history): #defining what happenes every time a user types a 
     messages = [{"role":"system","content": system_instruction}]
 
     #include past conversation logs
-    if histroy:
+    if history:
         messages.extend(history)
 
     #include the current user message
