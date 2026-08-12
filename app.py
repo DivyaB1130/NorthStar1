@@ -1,4 +1,5 @@
 import gradio as gr
+import pandas as pd
 from huggingface_hub import InferenceClient
 
 #from step 1 of lesson 12
@@ -8,12 +9,11 @@ import torch
 
 
 #from step 2 of lesson 12
-with open("northstar_rag_dataset.parquet","r",encoding="utf-8") as file:
-    #read the entire contents of the file and store it in a variable
-    northstar_text = file.read()
+df = pd.read_parquet("northstar_rag_dataset.parquet")
 
-#print the text below
-print(northstar_text)
+#print the dataframe and its columns below
+print(df.head())
+print(df.columns)
 
 
 
@@ -48,7 +48,10 @@ def preprocess_text(text):
   # Return the cleaned_chunks
   return cleaned_chunks
 
-cleaned_chuncks = preprocess_text(northstar_text)
+cleaned_chunks = df["text"].dropna().str.strip().tolist()
+cleaned_chunks = [c for c in cleaned_chunks if len(c) > 0]
+print(cleaned_chunks)
+print(len(cleaned_chunks))
 
 
 
