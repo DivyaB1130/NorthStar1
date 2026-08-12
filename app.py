@@ -6,9 +6,25 @@ from huggingface_hub import InferenceClient
 from sentence_transformers import SentenceTransformer
 import torch
 
-df = pd.read_parquet("northstar_rag_dataset.parquet")
-# inspect df.columns to find the right column name, e.g. df["text"]
-northstar_text = "\n".join(df["text"].astype(str).tolist())
+business_df = pd.read_json("yelp_academic_dataset_business.json", lines=True)
+# Fill missing values so string concatenation doesn't break
+for col in ["name", "city", "categories"]:
+    business_df[col] = business_df[col].fillna("")
+
+#to filter to actual restaurants/food places only,since the business file includes every kind of business (dentists, salons, etc.)
+business_df = business_df[business_df["categories"].str.contains("Restaurant|Food", case=False, na=False)].copy()
+
+#for restaurants in the file that don't have any ratings
+business_df["stars"] = business_df["stars"].fillna("No rating available")
+
+business_df["chunk_text"] = (
+    "Restaurant: " + business_df["name"] +
+    " | City: " + business_df["city"] +
+    " | Categories: " + business_df["categories"] +
+    " | Rating: " + business_df["stars"].astype(str)
+)
+business_df["chunk_text"] = business_df["chunk_text"].str.replace("\n", " ", regex=False)
+northstar_text = "\n".join(business_df["chunk_text"].astype(str).tolist())
 
 def preprocess_text(text):
   # Strip extra whitespace from the beginning and the end of the text
@@ -51,7 +67,6 @@ def get_top_chunks(query, chunk_embeddings, text_chunks):
   query_embedding_normalized = query_embedding / query_embedding.norm()
   # Normalize all chunk embeddings to unit length for consistent comparison
   chunk_embeddings_normalized = chunk_embeddings / chunk_embeddings.norm(dim=1, keepdim=True)
-
   # Calculate cosine similarity between all chunks and the query using matrix multiplication
   similarities = torch.matmul(chunk_embeddings_normalized, query_embedding_normalized) # Complete this line
   # Find the indices of the 3 chunks with highest similarity scores
