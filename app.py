@@ -1,5 +1,5 @@
 import gradio as gr
-import panda as pd
+import pandas as pd
 from huggingface_hub import InferenceClient
 
 #from step 1 of lesson 12
