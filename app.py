@@ -48,7 +48,7 @@ def preprocess_text(text):
   # Return the cleaned_chunks
   return cleaned_chunks
 
-cleaned_chunks = df["text"].dropna().str.strip().tolist()
+cleaned_chunks = df["rag_document"].dropna().str.strip().tolist()
 cleaned_chunks = [c for c in cleaned_chunks if len(c) > 0]
 print(cleaned_chunks)
 print(len(cleaned_chunks))
