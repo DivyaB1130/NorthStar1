@@ -1,4 +1,5 @@
-gradio
+gradio>=4.44.0
+requests
 huggingface_hub
 sentence-transformers
 torch
