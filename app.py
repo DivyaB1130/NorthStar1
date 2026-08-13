@@ -1,93 +1,116 @@
 import gradio as gr
-import pandas as pd
+import os
 from huggingface_hub import InferenceClient
+FOURSQUARE_API_KEY = os.environ.get("FOURSQUARE_API_KEY")
 
-#from step 1 of lesson 12
-from sentence_transformers import SentenceTransformer
-import torch
+def extract_preferences(message):
+    extraction_prompt = (
+        "Extract the following from the user's message and return ONLY valid JSON.\n"
+        "Fields: destination_city (string or null), current_location (string or null), price (integer 1-4 or null), meal (string or null),"
+        "intent (one of: \"food\", \"activities\", or null if unclear).\n\n"
+        f"User message: \"{message}\"\n\nJSON:"
+    )
+    
+    response = client.chat_completion([{"role": "user", "content": extraction_prompt}])
+    raw = response.choices[0].message.content.strip()
+    try: #trying to covert the reply into a dictionary  
+        preferences = json.loads(raw)
+  #if for any reason it doesn't covert, fall back to default(all fields empty) so the whole code doesn't stop
+    except json.JSONDecodeError:
+        preferences = {"destination_city": None, "price": None, "meal": None} 
+    return preferences
 
-business_df = pd.read_json("yelp_academic_dataset_business.json", lines=True)
-# Fill missing values so string concatenation doesn't break
-for col in ["name", "city", "categories"]:
-    business_df[col] = business_df[col].fillna("")
+def get_food_recommendations(city, price=None, limit=30):
+    url = "https://places-api.foursquare.com/places/search"
+    headers = {#identifies us when we go to the url
+        "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
+        "Accept": "application/json",
+        "X-Places-Api-Version": "2025-06-17"
+    }
+    '''
+13065 — Restaurant (covers every restaurant sub-type), 13032 — Café / Coffee House, 13002 — Bakery, 13054 — Food Truck, 13040 — Dessert Shop
+13052 — Food Court, 13053 — Food Stand)
+    '''
+    params = {#paramenters for the search
+        "near": city,
+        "fsq_category_ids": "13065,13032,13002,13145,13054,13040,13052,13053",
+        "fields": "name,location,categories,price",
+        "limit": limit,
+    }
+    if price:
+        params["min_price"] = price
+        params["max_price"] = price
 
-#to filter to actual restaurants/food places only,since the business file includes every kind of business (dentists, salons, etc.)
-business_df = business_df[business_df["categories"].str.contains("Restaurant|Food", case=False, na=False)].copy()
+    response = requests.get(url, headers=headers, params=params)
+    
+    if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
+        print("Rate limited — wait a bit before trying again.")
+        return []
 
-#for restaurants in the file that don't have any ratings
-business_df["stars"] = business_df["stars"].fillna("No rating available")
+    response.raise_for_status()
+    results = response.json().get("results", [])
 
-business_df["chunk_text"] = (
-    "Restaurant: " + business_df["name"] +
-    " | City: " + business_df["city"] +
-    " | Categories: " + business_df["categories"] +
-    " | Rating: " + business_df["stars"].astype(str)
-)
-business_df["chunk_text"] = business_df["chunk_text"].str.replace("\n", " ", regex=False)
-northstar_text = "\n".join(business_df["chunk_text"].astype(str).tolist())
+    chunks = []
+    for place in results: #organising all the info we got
+        name = place.get("name", "Unknown")
+        address = place.get("location", {}).get("formatted_address", "Address not listed")
+        category = ", ".join(c["name"] for c in place.get("categories", []))
+        place_price = place.get("price", "Price not listed")
+        chunks.append(f"Restaurant: {name} | Address: {address} | Categories: {category} | Price: {place_price}")
+   
+    return chunks
 
-def preprocess_text(text):
-  # Strip extra whitespace from the beginning and the end of the text
-  cleaned_text = text.strip()
-  # Split the cleaned_text by every newline character (\n)
-  chunks = cleaned_text.split("\n")
-  # Create an empty list to store cleaned chunks
-  cleaned_chunks = []
-  # Write your for-in loop below to clean each chunk and add it to the cleaned_chunks list
-  # This is only one way scholars may write this, but there are other ways!
-  for chunk in chunks:
-    stripped_chunk = chunk.strip()
-    if len(stripped_chunk) > 0:
-      cleaned_chunks.append(stripped_chunk)
-  # The if chunk.strip() conditional is truthy if the string is not empty
-  # cleaned_chunks = [chunk.strip() for chunk in chunks if chunk.strip()]
-  # Return the cleaned_chunks
-  return cleaned_chunks
+def get_activity_recommendations(city, limit=30):
+    url = "https://places-api.foursquare.com/places/search"
+    headers = { #identifies us when we vist the url to pull info
+        "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
+        "Accept": "application/json",
+        "X-Places-Api-Version": "2025-06-17"
+    }
+    '''
+foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and Outdoors, 18000- Sports and Recreation, 
+19000 - Travel and Transportation, 17116 - Souvenir Store, 17144 - Market, 17115 - Shopping Plaza, 17089 - Gift Store.
+    '''
+    params = {#the parameters for the search we want to do
+        "near": city,
+        "fsq_category_ids": "10000,16000,18000,19000,17116,17144,17115,17089,17002,17138,17018",
+        "fields": "name,location,categories,price",
+        "limit": limit,
+    }
+    
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code == 429: #if there have been too many pull requests
+        print("Rate limited — wait a bit before trying again.")
+        return []
+    response.raise_for_status()
+    results = response.json().get("results", [])
 
-cleaned_chunks = preprocess_text(northstar_text)
-#step 4 from lesson 12
-# Load the pre-trained embedding model that converts text to vectors
-model = SentenceTransformer('all-MiniLM-L6-v2')
+    chunks = []
+    for place in results: #organising all the info we got
+        name = place.get("name", "Unknown")
+        address = place.get("location", {}).get("formatted_address", "Address not listed")
+        category = ", ".join(c["name"] for c in place.get("categories", []))
+        place_price = place.get("price", "Price not listed")
+        chunks.append(f"Attraction: {name} | Address: {address} | Categories: {category} | Price: {place_price} ")
 
-def create_embeddings(text_chunks):
-  # Convert each text chunk into a vector embedding and store as a tensor
-  chunk_embeddings = model.encode(text_chunks, convert_to_tensor=True) # Replace ... with the cleaned_chunks list
-  # Return the chunk_embeddings
-  return chunk_embeddings
-
-# Call the create_embeddings function and store the result in a new chunk_embeddings variable
-chunk_embeddings = create_embeddings(cleaned_chunks) # Complete this line
-
-#step 5 from lesson 12
-# Define a function to find the most relevant text chunks for a given query, chunk_embeddings, and text_chunks
-def get_top_chunks(query, chunk_embeddings, text_chunks):
-  # Convert the query text into a vector embedding
-  query_embedding = model.encode(query, convert_to_tensor=True) # Complete this line
-  # Normalize the query embedding to unit length for accurate similarity comparison
-  query_embedding_normalized = query_embedding / query_embedding.norm()
-  # Normalize all chunk embeddings to unit length for consistent comparison
-  chunk_embeddings_normalized = chunk_embeddings / chunk_embeddings.norm(dim=1, keepdim=True)
-  # Calculate cosine similarity between all chunks and the query using matrix multiplication
-  similarities = torch.matmul(chunk_embeddings_normalized, query_embedding_normalized) # Complete this line
-  # Find the indices of the 3 chunks with highest similarity scores
-  top_indices = torch.topk(similarities, k=3).indices
-  # Create an empty list to store the most relevant chunks
-  top_chunks = []
-  # Loop through the top indices and retrieve the corresponding text chunks
-  for i in top_indices:
-    chunk = text_chunks[i]
-    top_chunks.append(chunk)
-
-  # Return the list of most relevant chunks
-  return top_chunks
+    return chunks
 
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
-def respond(message,history): #defining what happenes every time a user types a message and hits enter
-    northstar_chunks = get_top_chunks(message, chunk_embeddings, cleaned_chunks)    
-    system_instruction = (
-        f"You are NorthStar*, a friendly AI travel guide specializing in food recommendations.\n Ask the user for three things if they haven't provided them:\n 1) Where they are going (City/Location)\n 2) Their budget/price range ($, $$, or $$$)\n 3) The meal of the day (Breakfast, Brunch, Lunch, Dinner)\n Structure your recommendations clearly with the restaurant name, why it fits their request, and a tip on what to order. Make sure to pull from: {northstar_chunks}"
-    )
+def respond(message,history): 
+    preferences = extract_preferences(message)    
+    if not preferences.get("destination_city"):
+        northstar_chunks = []
+    elif preferences.get("intent") == "activities":
+        northstar_chunks = get_activity_recommendations(city=preferences["destination_city"])
+    else:
+        # default to food if intent is food or unclear
+        northstar_chunks = get_food_recommendations(city=preferences["destination_city"],price=preferences.get("price"))
+        
+    system_instruction = (f"You are NorthStar*, a friendly AI travel guide for food and activities. The user is looking for: {preferences.get('meal', 'a meal')}." 
+        "From the places listed below, prioritize and highlight the ones that genuinely make sense for that time of day (e.g., a coffee shop or bakery fits breakfast better than a steakhouse)."
+        "Structure your recommendations clearly with the address, why they fit the user's request, and some tips on what to order"
+        f"Here is live data to pull from: {northstar_chunks}."
     #managing the conversation memory
     messages = [{"role":"system","content": system_instruction}]
 
@@ -99,7 +122,7 @@ def respond(message,history): #defining what happenes every time a user types a 
     messages.append({"role":"user","content":message})
     
     #get the answer and launching the app
-    response = client.chat_completion(messages, max_tokens=200, temperature=0.8)
+    response = client.chat_completion(messages, max_tokens=200, temperature=0.3)
     return response.choices[0].message.content.strip()
 
 chatbot = gr.ChatInterface(
