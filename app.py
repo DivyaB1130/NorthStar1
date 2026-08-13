@@ -190,15 +190,6 @@ name_input = gr.Textbox(label="Your name", placeholder="e.g. Alex")
 location_input = gr.Textbox(label="Your current location", placeholder="e.g. Austin, TX")
 meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"],label="Meal of the day")
 drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"],label="Drink (optional)")
-custom_css = """
-.gradio-container {
-    background-color: #FAF7F2;
-}
-label {
-    font-weight: 600;
-    color: #3A3A3A;
-}
-"""
 
 conversation_state = gr.State(None)  # renamed from results_offset for clarity, since it's holding more than just an offset now
 chatbot = gr.ChatInterface(
@@ -206,8 +197,7 @@ chatbot = gr.ChatInterface(
     additional_inputs=[name_input, location_input, meal_input, drink_input, conversation_state],
     additional_outputs=[conversation_state],
     title="🧭 NorthStar",
-    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?",
-    css=custom_css
+    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
 )
 chatbot.launch()
 
