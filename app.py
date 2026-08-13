@@ -111,7 +111,7 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
 
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
-def respond(message,history, conversation_state):
+def respond(message, history, name, location, meals, drinks,conversation_state):
     if conversation_state is None:
         conversation_state = {"offset": 0, "city": None, "intent": None}
     yield "Thinking...", conversation_state # shows immediately while the slower steps run
@@ -119,12 +119,14 @@ def respond(message,history, conversation_state):
     # Fall back to the remembered city/intent from state if this message didn't mention one
     city = preferences.get("destination_city") or preferences.get("current_location") or conversation_state.get("city")
     intent = preferences.get("intent") or conversation_state.get("intent") or "food"
+    drink_note = f" They'd also like a {', '.join(drinks)}." if drinks else ""
+    greeting_name = name.strip() if name else "there"
 
     wants_more = any(kw in message.lower() for kw in ["more", "something else", "other options", "different"])
 
     # Only advance the offset if it's a "more" request for the SAME city — a new city always resets to page 1
     if wants_more and city == conversation_state.get("city"):
-        offset = conversation_state.get("offset", 0) + 10
+        offset = conversation_state.get("offset", 0) + 5
     else:
         offset = 0
 
@@ -136,7 +138,7 @@ def respond(message,history, conversation_state):
         # default to food if intent is food or unclear
         northstar_chunks = get_food_recommendations(city=city,price=preferences.get("price"))
 
-    page = northstar_chunks[offset : offset + 10] # Save everything back into state for next turn
+    page = northstar_chunks[offset : offset + 5] # Save everything back into state for next turn
     if page:
         results_text = str(page)
     else:
@@ -149,7 +151,7 @@ def respond(message,history, conversation_state):
         "for type of meal (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
         "Structure your recommendations clearly with the address, budget range, why they fit the user's request, and tips. "
         f"NEVER invent a place that isn't in this data. Here is live data to pull from: {results_text}"
-        #using page instead of northstar chunks because we want it to see only 10 results first
+        #using page instead of northstar chunks because we want it to see only 5 results first
         "When recommending places to go in a city or activities to do in a place, if exact pricing isn't available in the data provided, "
         "give the user a general sense of expected cost based on the type of place "
         "(e.g., 'most public parks are free', 'museums typically charge an entrance fee, "
@@ -176,10 +178,15 @@ def respond(message,history, conversation_state):
             partial_response += token
             yield partial_response, conversation_state
 
+name_input = gr.Textbox(label="Your name", placeholder="e.g. Alex")
+location_input = gr.Textbox(label="Your current location", placeholder="e.g. Austin, TX")
+meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"],label="Meal of the day")
+drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"],label="Drink (optional)")
+
 conversation_state = gr.State(None)  # renamed from results_offset for clarity, since it's holding more than just an offset now
 chatbot = gr.ChatInterface(
     respond,
-    additional_inputs=[conversation_state],
+    additional_inputs=[name_input, location_input, meal_input, drink_input, conversation_state],
     additional_outputs=[conversation_state],
     title="NorthStar",
     description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
