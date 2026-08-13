@@ -102,6 +102,11 @@ def respond(message,history): #defining what happenes every time a user types a 
     response = client.chat_completion(messages, max_tokens=200, temperature=0.8)
     return response.choices[0].message.content.strip()
 
-chatbot = gr.ChatInterface(respond)
+chatbot = gr.ChatInterface(
+    respond,
+    title="NorthStar",
+    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?",
+    examples=["I'm craving some food", "I want to explore somewhere new"]
+)
 chatbot.launch()
 
