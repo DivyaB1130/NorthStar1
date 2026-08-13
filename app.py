@@ -8,19 +8,18 @@ FOURSQUARE_API_KEY = os.environ.get("FOURSQUARE_API_KEY")
 def extract_preferences(message):
     extraction_prompt = (
         "Extract the following from the user's message and return ONLY valid JSON.\n"
-        "Fields: destination_city (string or null), current_location (string or null), price (integer 1-4 or null), meal (string or null),"
-        "intent (one of: \"food\", \"activities\", or null if unclear).\n\n"
+        "Fields: destination_city (string or null), current_location (string or null), price (integer 1-4 or null), "
+        "meal (string or null), intent (one of: \"food\", \"activities\", or null if unclear), "
         "wants_more (true if the user is asking for different/additional/other recommendations, otherwise false).\n\n"
         f"User message: \"{message}\"\n\nJSON:"
     )
-    
     response = client.chat_completion([{"role": "user", "content": extraction_prompt}])
     raw = response.choices[0].message.content.strip()
     try: #trying to covert the reply into a dictionary  
         preferences = json.loads(raw)
   #if for any reason it doesn't covert, fall back to default(all fields empty) so the whole code doesn't stop
     except json.JSONDecodeError:
-        preferences = {"destination_city": None, "price": None, "meal": None, "current_location":None, "intent":None} 
+        preferences = {"destination_city": None, "price": None, "meal": None, "current_location": None, "intent": None, "wants_more": False}
     return preferences
     
 recommendation_cache = {}  #storage
@@ -54,8 +53,9 @@ def get_food_recommendations(city, price=None, limit=50):
     response = requests.get(url, headers=headers, params=params, timeout=10)
     
     if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
-        print("Rate limited — wait a bit before trying again.")
-        return []
+        retry_after = response.headers.get("Retry-After", "unknown")
+        print(f"Rate limited — retry after: {retry_after} seconds")
+        return []        
 
     response.raise_for_status()
     results = response.json().get("results", [])
@@ -95,9 +95,11 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
     }
     
     response = requests.get(url, headers=headers, params=params, timeout=10)
-    if response.status_code == 429: #if there have been too many pull requests
-        print("Rate limited — wait a bit before trying again.")
-        return []
+    if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
+        retry_after = response.headers.get("Retry-After", "unknown")
+        print(f"Rate limited — retry after: {retry_after} seconds")
+        return []     
+
     response.raise_for_status()
     results = response.json().get("results", [])
 
@@ -146,20 +148,23 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
     conversation_state = {"offset": offset, "city": city, "intent": intent}
     if page:
         results_text = str(page)
+        data_status = "real"
     else:
         results_text = "No results available. Do not invent any places — tell the user you don't have data for this yet."
+        data_status = "unavailable"
     
     system_instruction = (
-        "You are NorthStar*, a friendly AI travel guide for food and activities. "
-        f"The user's name is {greeting_name}.{drink_note} "
-        f"The user is looking for: {meal}. "
-        "From the places listed below, prioritize five that genuinely fit the meal or activity type. "
-        "Structure your recommendations clearly with the address, budget range, why they fit the user's request, and tips. "
-        f"NEVER invent a place that isn't in this data. Here is live data to pull from: {results_text} "
-        "When recommending places, if exact pricing isn't available, give a general sense of expected cost "
-        "(e.g., 'most public parks are free', 'museums typically charge an entrance fee, check their site for current pricing') "
-        "rather than stating a specific number you're unsure of."
-    )
+    "You are NorthStar*, a friendly AI travel guide for food and activities. "
+    f"The user's name is {greeting_name}.{drink_note} "
+    f"The user is looking for: {meal}. "
+    f"Data availability status: {data_status}. "
+    "If the data status is 'unavailable', clearly tell the user you're temporarily unable to pull live results "
+    "and ask them to try again shortly — do NOT invent, brainstorm, or suggest any specific place names, addresses, or businesses. "
+    "If the data status is 'real', recommend up to five places that genuinely fit the meal or activity type, using only what's listed below - "
+    "if fewer than five relevant places are available in the data, only list the ones that are actually there. "
+    "Never invent additional places, branches, or variations. "
+    f"Here is the live data (if any): {results_text}"
+)
            
     #managing the conversation memory
     messages = [{"role":"system","content": system_instruction}]
