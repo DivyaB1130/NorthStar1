@@ -20,8 +20,20 @@ def extract_preferences(message):
     except json.JSONDecodeError:
         preferences = {"destination_city": None, "price": None, "meal": None} 
     return preferences
-
+    
+api_call_count = 0 #the number of times the chatbot makes a call
+MAX_CALLS_PER_SESSION = 20 
+recommendation_cache = {}  #storage
 def get_food_recommendations(city, price=None, limit=30):
+    cache_key = f"{city.strip().lower()}_{price}_{limit}"
+    if cache_key in recommendation_cache:
+        print(f"Using cached results for '{city}' — no API call made.")
+        return recommendation_cache[cache_key]
+        
+    global api_call_count #for keeping track of the number of calls
+    if api_call_count >= MAX_CALLS_PER_SESSION: #to limit number of calls per user
+        print("Session call limit reached.")
+        return []
     url = "https://places-api.foursquare.com/places/search"
     headers = {#identifies us when we go to the url
         "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
@@ -51,6 +63,7 @@ def get_food_recommendations(city, price=None, limit=30):
     response.raise_for_status()
     results = response.json().get("results", [])
 
+    api_call_count += 1 #updating number of calls
     chunks = []
     for place in results: #organising all the info we got
         name = place.get("name", "Unknown")
@@ -58,10 +71,20 @@ def get_food_recommendations(city, price=None, limit=30):
         category = ", ".join(c["name"] for c in place.get("categories", []))
         place_price = place.get("price", "Price not listed")
         chunks.append(f"Restaurant: {name} | Address: {address} | Categories: {category} | Price: {place_price}")
-   
+    recommendation_cache[cache_key] = chunks # storing here
     return chunks
-
+    
+attraction_cache = {} #storage
 def get_activity_recommendations(city, limit=30):
+    cache_key = f"{city.strip().lower()}_{limit}"
+    if cache_key in attraction_cache:
+        print(f"Using cached results for '{city}' — no API call made.")
+        return attraction_cache[cache_key]
+
+    global api_call_count #for tracking number of calls
+    if api_call_count >= MAX_CALLS_PER_SESSION: #to limit calls per user
+        print("Session call limit reached.")
+        return []
     url = "https://places-api.foursquare.com/places/search"
     headers = { #identifies us when we vist the url to pull info
         "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
@@ -86,6 +109,7 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
     response.raise_for_status()
     results = response.json().get("results", [])
 
+    api_call_count += 1 #updating number of calls
     chunks = []
     for place in results: #organising all the info we got
         name = place.get("name", "Unknown")
@@ -93,12 +117,12 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
         category = ", ".join(c["name"] for c in place.get("categories", []))
         place_price = place.get("price", "Price not listed")
         chunks.append(f"Attraction: {name} | Address: {address} | Categories: {category} | Price: {place_price} ")
-
+    attraction_cache[cache_key] = chunks #storing info here
     return chunks
 
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
-def respond(message,history): 
+def respond(message,history):
     yield "Thinking..."  # shows immediately while the slower steps run
     preferences = extract_preferences(message)    
     if not preferences.get("destination_city"):
@@ -109,7 +133,9 @@ def respond(message,history):
         # default to food if intent is food or unclear
         northstar_chunks = get_food_recommendations(city=preferences["destination_city"],price=preferences.get("price"))
     system_instruction = (
-        f"You are NorthStar*, a friendly AI travel guide for food and activities. The user is looking for: {preferences.get('meal', 'a meal')}. "
+        "You are NorthStar*, a friendly AI travel guide for food and activities. Ask the user for their location if not"
+        "already provided so you can make recommendations based on their location."
+        f"The user is looking for: {preferences.get('meal', 'a meal')}. "
         "From the places listed below, prioritize and highlight the ones that genuinely make sense "
         "for that time of day (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
         "Structure your recommendations clearly with the address, budget, why they fit the user's request, and tips. "
@@ -120,10 +146,6 @@ def respond(message,history):
         "check their site for current pricing') rather than stating a specific number you're unsure of."
     )
         
-    system_instruction = (f"You are NorthStar*, a friendly AI travel guide for food and activities. The user is looking for: {preferences.get('meal', 'a meal')}." 
-        "From the places listed below, prioritize and highlight the ones that genuinely make sense for that time of day (e.g., a coffee shop or bakery fits breakfast better than a steakhouse)."
-        "Structure your recommendations clearly with the address, why they fit the user's request, and some tips on what to order"
-        f"Here is live data to pull from: {northstar_chunks}.")
     #managing the conversation memory
     messages = [{"role":"system","content": system_instruction}]
 
