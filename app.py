@@ -97,7 +97,7 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
     response = requests.get(url, headers=headers, params=params, timeout=10)
     if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
         retry_after = response.headers.get("Retry-After", "unknown")
-        print(f"Rate limited — retry after: {retry_after} seconds". Response text: {response.text})
+        print(f"Rate limited — retry after: {retry_after} seconds. Response text: {response.text}")
         return []     
 
     response.raise_for_status()
