@@ -114,7 +114,7 @@ client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 def respond(message,history, conversation_state):
     if conversation_state is None:
         conversation_state = {"offset": 0, "city": None, "intent": None}
-    yield "Thinking...", state # shows immediately while the slower steps run
+    yield "Thinking...", conversation_state # shows immediately while the slower steps run
     preferences = extract_preferences(message)   
     # Fall back to the remembered city/intent from state if this message didn't mention one
     city = preferences.get("destination_city") or preferences.get("current_location") or conversation_state.get("city")
@@ -145,7 +145,7 @@ def respond(message,history, conversation_state):
     system_instruction = (
         "You are NorthStar*, a friendly AI travel guide for food and activities. If you don't know the user's location yet, ask for it. "
         f"The user is looking for: {preferences.get('meal', 'a meal')}. "
-        "From the places listed below, prioritize the ones that genuinely fit the meal or activity type. "
+        "From the places listed below, prioritize five that genuinely fit the meal or activity type. "
         "for type of meal (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
         "Structure your recommendations clearly with the address, budget range, why they fit the user's request, and tips. "
         f"NEVER invent a place that isn't in this data. Here is live data to pull from: {results_text}"
