@@ -1,897 +1,179 @@
 import gradio as gr
 import os
-import requests
-import re
-
-# ============================================================
-# FOURSQUARE
-# ============================================================
-
+import json
+from huggingface_hub import InferenceClient
 FOURSQUARE_API_KEY = os.environ.get("FOURSQUARE_API_KEY")
 
-FOURSQUARE_URL = "https://places-api.foursquare.com/places/search"
-
-
-# ============================================================
-# GET RESTAURANTS FROM FOURSQUARE
-# ============================================================
-
-def get_restaurants(location):
-
-    if not location:
-        return []
-
-    headers = {
+def extract_preferences(message):
+    extraction_prompt = (
+        "Extract the following from the user's message and return ONLY valid JSON.\n"
+        "Fields: destination_city (string or null), current_location (string or null), price (integer 1-4 or null), meal (string or null),"
+        "intent (one of: \"food\", \"activities\", or null if unclear).\n\n"
+        f"User message: \"{message}\"\n\nJSON:"
+    )
+    
+    response = client.chat_completion([{"role": "user", "content": extraction_prompt}])
+    raw = response.choices[0].message.content.strip()
+    try: #trying to covert the reply into a dictionary  
+        preferences = json.loads(raw)
+  #if for any reason it doesn't covert, fall back to default(all fields empty) so the whole code doesn't stop
+    except json.JSONDecodeError:
+        preferences = {"destination_city": None, "price": None, "meal": None, "current_location":None, "intent":None} 
+    return preferences
+    
+recommendation_cache = {}  #storage
+def get_food_recommendations(city, price=None, limit=50):
+    cache_key = f"{city.strip().lower()}_{price}_{limit}"
+    if cache_key in recommendation_cache:
+        print(f"Using cached results for '{city}' — no API call made.")
+        return recommendation_cache[cache_key]
+        
+    url = "https://places-api.foursquare.com/places/search"
+    headers = {#identifies us when we go to the url
         "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
         "Accept": "application/json",
         "X-Places-Api-Version": "2025-06-17"
     }
-
-    params = {
-        "near": location.strip(),
+    '''
+13065 — Restaurant (covers every restaurant sub-type), 13032 — Café / Coffee House, 13002 — Bakery, 13054 — Food Truck, 13040 — Dessert Shop
+13052 — Food Court, 13053 — Food Stand)
+    '''
+    params = {#paramenters for the search
+        "near": city,
         "fsq_category_ids": "13065,13032,13002,13145,13054,13040,13052,13053",
         "fields": "name,location,categories,price",
-        "limit": 50
+        "limit": limit,
     }
+    #if price:
+        #params["min_price"] = price
+        #params["max_price"] = price
+    #This wasn't doing anything so I commented it out
 
-    try:
-        response = requests.get(
-            FOURSQUARE_URL,
-            headers=headers,
-            params=params,
-            timeout=10
-        )
-
-        if response.status_code == 429:
-            return []
-
-        response.raise_for_status()
-
-        results = response.json().get("results", [])
-
-        restaurants = []
-
-        for place in results:
-
-            name = place.get("name", "Unknown")
-
-            address = place.get(
-                "location", {}
-            ).get(
-                "formatted_address",
-                "Address not listed"
-            )
-
-            categories = [
-                c.get("name", "")
-                for c in place.get("categories", [])
-            ]
-
-            category_text = ", ".join(categories)
-
-            price = place.get("price")
-
-            restaurants.append({
-                "name": name,
-                "address": address,
-                "categories": category_text,
-                "price": price
-            })
-
-        return restaurants
-
-    except Exception as e:
-        print("Foursquare error:", e)
+    response = requests.get(url, headers=headers, params=params, timeout=10)
+    
+    if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
+        print("Rate limited — wait a bit before trying again.")
         return []
 
+    response.raise_for_status()
+    results = response.json().get("results", [])
 
-# ============================================================
-# FILTER RESTAURANTS
-# ============================================================
+    chunks = []
+    for place in results: #organising all the info we got
+        name = place.get("name", "Unknown")
+        address = place.get("location", {}).get("formatted_address", "Address not listed")
+        category = ", ".join(c["name"] for c in place.get("categories", []))
+        place_price = place.get("price", "Price not listed")
+        chunks.append(f"Restaurant: {name} | Address: {address} | Categories: {category} | Price: {place_price}")
+    recommendation_cache[cache_key] = chunks # storing here
+    return chunks
+    
+attraction_cache = {} #storage
+def get_activity_recommendations(city, limit=50):
+    cache_key = f"{city.strip().lower()}_{limit}"
+    if cache_key in attraction_cache:
+        print(f"Using cached results for '{city}' — no API call made.")
+        return attraction_cache[cache_key]
 
-def get_recommendations(location, meal, price, cuisine, dietary, vibe):
-
-    restaurants = get_restaurants(location)
-
-    if not restaurants:
+    url = "https://places-api.foursquare.com/places/search"
+    headers = { #identifies us when we vist the url to pull info
+        "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
+        "Accept": "application/json",
+        "X-Places-Api-Version": "2025-06-17"
+    }
+    '''
+foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and Outdoors, 18000- Sports and Recreation, 
+19000 - Travel and Transportation, 17116 - Souvenir Store, 17144 - Market, 17115 - Shopping Plaza, 17089 - Gift Store.
+    '''
+    params = {#the parameters for the search we want to do
+        "near": city,
+        "fsq_category_ids": "10000,16000,18000,19000,17116,17144,17115,17089,17002,17138,17018",
+        "fields": "name,location,categories,price",
+        "limit": limit,
+    }
+    
+    response = requests.get(url, headers=headers, params=params, timeout=10)
+    if response.status_code == 429: #if there have been too many pull requests
+        print("Rate limited — wait a bit before trying again.")
         return []
-
-    results = restaurants.copy()
-
-    # ========================================================
-    # PRICE
-    # ========================================================
-
-    if price:
-
-        price_map = {
-            "$": 1,
-            "$$": 2,
-            "$$$": 3,
-            "$$$$": 4
-        }
-
-        wanted_price = price_map.get(price)
-
-        if wanted_price:
-            results = [
-                r for r in results
-                if r["price"] == wanted_price
-            ]
-
-
-    # ========================================================
-    # CUISINE
-    # ========================================================
-
-    if cuisine and cuisine != "Surprise Me":
-
-        cuisine_keywords = {
-
-            "Asian": [
-                "asian",
-                "chinese",
-                "japanese",
-                "thai",
-                "indian",
-                "korean",
-                "vietnamese",
-                "sushi",
-                "ramen",
-                "filipino"
-            ],
-
-            "Italian": [
-                "italian",
-                "pizza",
-                "pasta"
-            ],
-
-            "Mexican": [
-                "mexican",
-                "taco",
-                "tex-mex"
-            ],
-
-            "American": [
-                "american",
-                "burger",
-                "bbq",
-                "steak"
-            ],
-
-            "Healthy": [
-                "healthy",
-                "salad",
-                "vegan",
-                "vegetarian",
-                "mediterranean"
-            ]
-        }
-
-        keywords = cuisine_keywords.get(cuisine, [])
-
-        filtered = []
-
-        for restaurant in results:
-
-            text = (
-                restaurant["name"]
-                + " "
-                + restaurant["categories"]
-            ).lower()
-
-            if any(keyword in text for keyword in keywords):
-                filtered.append(restaurant)
-
-        results = filtered
-
-
-    # ========================================================
-    # MEAL
-    # ========================================================
-
-    if meal:
-
-        meal_keywords = {
-
-            "Breakfast": [
-                "breakfast",
-                "brunch",
-                "cafe",
-                "coffee",
-                "bakery"
-            ],
-
-            "Lunch": [
-                "lunch",
-                "sandwich",
-                "deli",
-                "cafe",
-                "restaurant"
-            ],
-
-            "Dinner": [
-                "restaurant",
-                "steak",
-                "italian",
-                "mexican",
-                "japanese",
-                "bar"
-            ],
-
-            "Late Night": [
-                "bar",
-                "pub",
-                "night",
-                "pizza",
-                "fast food"
-            ]
-        }
-
-        keywords = meal_keywords.get(meal, [])
-
-        filtered = []
-
-        for restaurant in results:
-
-            text = (
-                restaurant["name"]
-                + " "
-                + restaurant["categories"]
-            ).lower()
-
-            if any(keyword in text for keyword in keywords):
-                filtered.append(restaurant)
-
-        # Only use the meal filter if it actually finds something.
-        # This prevents cities from showing "No matches" too easily.
-        if filtered:
-            results = filtered
-
-
-    # ========================================================
-    # VIBE
-    # ========================================================
-
-    if vibe:
-
-        vibe_keywords = {
-
-            "Quick & Casual": [
-                "fast food",
-                "takeout",
-                "deli",
-                "sandwich",
-                "cafe"
-            ],
-
-            "Sit-down": [
-                "restaurant",
-                "bistro",
-                "steakhouse",
-                "italian",
-                "mexican"
-            ],
-
-            "Special Occasion": [
-                "steakhouse",
-                "fine dining",
-                "wine",
-                "restaurant"
-            ],
-
-            "Café / Relaxed": [
-                "cafe",
-                "coffee",
-                "bakery",
-                "tea"
-            ],
-
-            "Fun & Social": [
-                "bar",
-                "pub",
-                "brewery",
-                "sports bar"
-            ]
-        }
-
-        keywords = vibe_keywords.get(vibe, [])
-
-        filtered = []
-
-        for restaurant in results:
-
-            text = (
-                restaurant["name"]
-                + " "
-                + restaurant["categories"]
-            ).lower()
-
-            if any(keyword in text for keyword in keywords):
-                filtered.append(restaurant)
-
-        # Same idea here:
-        # only apply vibe if it produces results.
-        if filtered:
-            results = filtered
-
-
-    # ========================================================
-    # DIETARY
-    # ========================================================
-
-    if dietary:
-
-        dietary_keywords = []
-
-        for item in dietary:
-
-            if item == "Vegetarian":
-                dietary_keywords += [
-                    "vegetarian",
-                    "vegan"
-                ]
-
-            elif item == "Vegan":
-                dietary_keywords += [
-                    "vegan"
-                ]
-
-            elif item == "Halal":
-                dietary_keywords += [
-                    "halal"
-                ]
-
-            elif item == "Gluten-Free":
-                dietary_keywords += [
-                    "gluten free",
-                    "gluten-free"
-                ]
-
-        filtered = []
-
-        for restaurant in results:
-
-            text = (
-                restaurant["name"]
-                + " "
-                + restaurant["categories"]
-            ).lower()
-
-            if any(keyword in text for keyword in dietary_keywords):
-                filtered.append(restaurant)
-
-        # Only filter if Foursquare actually has matches.
-        if filtered:
-            results = filtered
-
-
-    return results[:10]
-
-
-# ============================================================
-# FILTER SUMMARY
-# ============================================================
-
-def build_filter_summary_html(
-    location,
-    meal,
-    price,
-    cuisine,
-    dietary,
-    vibe
-):
-
-    dietary_text = (
-        ", ".join(dietary)
-        if dietary
-        else "No dietary restrictions"
+    response.raise_for_status()
+    results = response.json().get("results", [])
+
+    chunks = []
+    for place in results: #organising all the info we got
+        name = place.get("name", "Unknown")
+        address = place.get("location", {}).get("formatted_address", "Address not listed")
+        category = ", ".join(c["name"] for c in place.get("categories", []))
+        place_price = place.get("price", "Price not listed")
+        chunks.append(f"Attraction: {name} | Address: {address} | Categories: {category} | Price: {place_price} ")
+    attraction_cache[cache_key] = chunks #storing info here
+    return chunks
+
+client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
+
+def respond(message,history, results_offset):
+    yield "Thinking...", results_offset  # shows immediately while the slower steps run
+    preferences = extract_preferences(message)   
+    city = (preferences.get("destination_city") or preferences.get("current_location"))
+
+    if not city:
+        northstar_chunks = []
+    elif preferences.get("intent") == "activities":
+        northstar_chunks = get_activity_recommendations(city=city)
+    else:
+        # default to food if intent is food or unclear
+        northstar_chunks = get_food_recommendations(city=city,price=preferences.get("price"))
+    
+    # Deciding whether this is a "show me more" request or a fresh search
+    if "more" in message.lower() or "something else" in message.lower() or "other options" in message.lower():
+        results_offset += 10
+    else:
+        results_offset = 0  # a new city/search resets back to the beginning
+
+    page = northstar_chunks[results_offset : results_offset + 10]
+    
+    system_instruction = (
+        "You are NorthStar*, a friendly AI travel guide for food and activities. Ask the user for their location if not"
+        "already provided so you can make recommendations based on their location."
+        f"The user is looking for: {preferences.get('meal', 'a meal')}. "
+        "From the places listed below, prioritize and highlight the ones that genuinely make sense "
+        "for type of meal (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
+        "Structure your recommendations clearly with the address, budget range, why they fit the user's request, and tips. "
+        f"Don't make up places to go. Here is live data to pull from: {page}... " 
+        #using page instead of northstar chunks because we want it to see only 10 results first
+        "When recommending places to go in a city or activities to do in a place, if exact pricing isn't available in the data provided, "
+        "give the user a general sense of expected cost based on the type of place "
+        "(e.g., 'most public parks are free', 'museums typically charge an entrance fee, "
+        "check their site for current pricing') rather than stating a specific number you're unsure of."
     )
+           
+    #managing the conversation memory
+    messages = [{"role":"system","content": system_instruction}]
+
+    #include past conversation logs
+    if history:
+        messages.extend(history)
+
+    #include the current user message
+    messages.append({"role":"user","content":message})
+    
+    #get the answer and launching the app
+    stream = client.chat_completion(messages, max_tokens=400, temperature=0.2, stream=True)
+    #gives the chatbot the appearance of typing
+    partial_response = ""
+    for chunk in stream:
+        token = chunk.choices[0].delta.content
+        if token:
+            partial_response += token
+            yield partial_response, results_offset
+            
+results_offset = gr.State({"offset":0, "city":None}) #keep track of conversation
+chatbot = gr.ChatInterface(
+    respond,
+    additional_inputs=[results_offset],
+    additional_outputs=[results_offset],
+    title="NorthStar",
+    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
+)
+chatbot.launch()
 
-    preferences = []
-
-    if meal:
-        preferences.append(meal)
-
-    if price:
-        preferences.append(price)
-
-    if cuisine:
-        preferences.append(cuisine)
-
-    if vibe:
-        preferences.append(vibe)
-
-    preference_text = (
-        " — ".join(preferences)
-        if preferences
-        else "No preferences set"
-    )
-
-    return f"""
-    <div class="filter-summary">
-        <p>📍 {location or "Anywhere"}</p>
-        <p>{preference_text}</p>
-        <p>{dietary_text}</p>
-    </div>
-    """
-
-
-# ============================================================
-# BUILD RESULTS
-# ============================================================
-
-def build_results_html(
-    location,
-    meal,
-    price,
-    cuisine,
-    dietary,
-    vibe
-):
-
-    restaurants = get_recommendations(
-        location,
-        meal,
-        price,
-        cuisine,
-        dietary,
-        vibe
-    )
-
-    if not restaurants:
-
-        return """
-        <p class="no-results">
-            No matches found — try changing your filters.
-        </p>
-        """
-
-    cards = ""
-
-    for restaurant in restaurants:
-
-        price_display = ""
-
-        if restaurant["price"]:
-            price_display = "$" * restaurant["price"]
-
-        else:
-            price_display = "$$"
-
-        cards += f"""
-        <div class="result-card">
-
-            <h3>{restaurant["name"]}</h3>
-
-            <p class="result-meta">
-                {price_display}
-            </p>
-
-            <p class="result-address">
-                📍 {restaurant["address"]}
-            </p>
-
-            <p class="result-tagline">
-                {restaurant["categories"]}
-            </p>
-
-        </div>
-        """
-
-    return cards
-
-
-# ============================================================
-# BUTTON FUNCTIONS
-# ============================================================
-
-def handle_find_food(
-    location,
-    meal,
-    price,
-    cuisine,
-    dietary,
-    vibe
-):
-
-    summary = build_filter_summary_html(
-        location,
-        meal,
-        price,
-        cuisine,
-        dietary,
-        vibe
-    )
-
-    results = build_results_html(
-        location,
-        meal,
-        price,
-        cuisine,
-        dietary,
-        vibe
-    )
-
-    return (
-        gr.update(visible=False),
-        gr.update(visible=True),
-        summary,
-        results
-    )
-
-
-def handle_edit_filters():
-
-    return (
-        gr.update(visible=True),
-        gr.update(visible=False)
-    )
-
-
-# ============================================================
-# CSS
-# ============================================================
-
-custom_css = """
-
-body,
-.gradio-container {
-    background-color: #C9A9A6 !important;
-}
-
-#header {
-    text-align: center;
-    background-color: #183B35 !important;
-    color: #FAF1E6 !important;
-    padding: 30px;
-    border-radius: 15px;
-    margin-bottom: 25px;
-}
-
-#header h1,
-#header p {
-    color: #FAF1E6 !important;
-}
-
-h1, h2, h3, h4, h5, h6 {
-    color: #183B35 !important;
-}
-
-#location-box {
-    background-color: #183B35 !important;
-    border-radius: 20px !important;
-    padding: 20px !important;
-}
-
-#location-box input {
-    background-color: #041D47 !important;
-    border: 2px solid #FAF1E6 !important;
-    color: #FAF1E6 !important;
-}
-
-#location-box input::placeholder {
-    color: #C9A9A6 !important;
-}
-
-#preferences-group {
-    background-color: #183B35 !important;
-    border-radius: 12px !important;
-    padding: 15px !important;
-}
-
-#preferences-group .form,
-#preferences-group .block {
-    background-color: #183B35 !important;
-    border: none !important;
-}
-
-#meal-radio,
-#price-radio,
-#cuisine-radio,
-#dietary-checkbox,
-#vibe-radio {
-    background-color: transparent !important;
-    padding: 10px 0 !important;
-}
-
-#meal-radio label,
-#price-radio label,
-#cuisine-radio label,
-#vibe-radio label,
-#dietary-checkbox label {
-    background-color: #5B2333 !important;
-    color: #FAF1E6 !important;
-    border-radius: 10px !important;
-    border: 2px solid #5B2333 !important;
-    padding: 10px 15px !important;
-}
-
-#meal-radio label span,
-#price-radio label span,
-#cuisine-radio label span,
-#vibe-radio label span,
-#dietary-checkbox label span {
-    color: #FAF1E6 !important;
-}
-
-#meal-radio label:has(input:checked),
-#price-radio label:has(input:checked),
-#cuisine-radio label:has(input:checked),
-#vibe-radio label:has(input:checked),
-#dietary-checkbox label:has(input:checked) {
-    background-color: #4E7360 !important;
-    border-color: #4E7360 !important;
-}
-
-label {
-    color: #183B35 !important;
-}
-
-#find-button {
-    background-color: #5B2333 !important;
-    color: #FAF1E6 !important;
-    font-size: 18px !important;
-    font-weight: bold !important;
-    border-radius: 12px !important;
-    border: none !important;
-    padding: 15px !important;
-}
-
-#find-button:hover {
-    background-color: #183B35 !important;
-}
-
-#results-header-row {
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: center !important;
-    margin-bottom: 20px !important;
-}
-
-#results-header-row h2 {
-    margin: 0 !important;
-}
-
-#edit-filters-button {
-    background-color: #5B2333 !important;
-    color: #FAF1E6 !important;
-    font-weight: bold !important;
-    border-radius: 10px !important;
-    border: none !important;
-    padding: 10px 18px !important;
-}
-
-#edit-filters-button:hover {
-    background-color: #183B35 !important;
-}
-
-.filter-summary {
-    background-color: #183B35 !important;
-    color: #FAF1E6 !important;
-    border-radius: 12px !important;
-    padding: 15px 20px !important;
-    margin-bottom: 20px !important;
-}
-
-.filter-summary p {
-    margin: 4px 0 !important;
-    color: #FAF1E6 !important;
-}
-
-.result-card {
-    background-color: #FAF1E6 !important;
-    color: #183B35 !important;
-    border-radius: 15px !important;
-    padding: 20px !important;
-    margin-bottom: 18px !important;
-    border: 2px solid #4E7360 !important;
-}
-
-.result-card h3 {
-    margin-top: 0 !important;
-    color: #183B35 !important;
-}
-
-.result-meta {
-    color: #5B2333 !important;
-    font-weight: bold !important;
-}
-
-.result-address {
-    color: #183B35 !important;
-}
-
-.result-tagline {
-    font-style: italic !important;
-    color: #183B35 !important;
-}
-
-.no-results {
-    color: #183B35 !important;
-    text-align: center !important;
-    padding: 20px !important;
-}
-
-"""
-
-
-# ============================================================
-# GRADIO APP
-# ============================================================
-
-with gr.Blocks(
-    css=custom_css,
-    title="NorthStar*"
-) as demo:
-
-    # ========================================================
-    # HEADER
-    # ========================================================
-
-    gr.Markdown(
-        """
-        <div id="header">
-            <h1>★ NORTHSTAR*</h1>
-            <p>FOOD GUIDED BY YOU</p>
-            <p>Find your next favorite bite.</p>
-        </div>
-        """,
-        elem_id="header"
-    )
-
-
-    # ========================================================
-    # SCREEN 1
-    # ========================================================
-
-    with gr.Column(
-        visible=True,
-        elem_id="screen1"
-    ) as screen1:
-
-        gr.Markdown("## Where are you eating?")
-
-        location = gr.Textbox(
-            label="📍 Location",
-            placeholder="Search a city, neighborhood, or destination...",
-            elem_id="location-box"
-        )
-
-        gr.Markdown("## What are you looking for?")
-
-        with gr.Group(
-            elem_id="preferences-group"
-        ):
-
-            meal = gr.Radio(
-                [
-                    "Breakfast",
-                    "Lunch",
-                    "Dinner",
-                    "Late Night"
-                ],
-                label="🍽️ Meal",
-                elem_id="meal-radio"
-            )
-
-            price = gr.Radio(
-                [
-                    "$",
-                    "$$",
-                    "$$$",
-                    "$$$$"
-                ],
-                label="💰 Price Range",
-                elem_id="price-radio"
-            )
-
-            cuisine = gr.Radio(
-                [
-                    "Asian",
-                    "Italian",
-                    "Mexican",
-                    "Healthy",
-                    "American",
-                    "Surprise Me"
-                ],
-                label="🥗 Cuisine",
-                elem_id="cuisine-radio"
-            )
-
-            dietary = gr.CheckboxGroup(
-                [
-                    "Vegetarian",
-                    "Vegan",
-                    "Halal",
-                    "Gluten-Free"
-                ],
-                label="🥒 Dietary Preferences (Optional)",
-                elem_id="dietary-checkbox"
-            )
-
-            vibe = gr.Radio(
-                [
-                    "Quick & Casual",
-                    "Sit-down",
-                    "Special Occasion",
-                    "Café / Relaxed",
-                    "Fun & Social"
-                ],
-                label="✨ Dining Vibe",
-                elem_id="vibe-radio"
-            )
-
-        find_button = gr.Button(
-            "FIND MY FOOD →",
-            elem_id="find-button"
-        )
-
-
-    # ========================================================
-    # SCREEN 2
-    # ========================================================
-
-    with gr.Column(
-        visible=False,
-        elem_id="screen2"
-    ) as screen2:
-
-        with gr.Row(
-            elem_id="results-header-row"
-        ):
-
-            gr.Markdown("## ← NorthStar*")
-
-            edit_filters_button = gr.Button(
-                "★ Edit Filters",
-                elem_id="edit-filters-button"
-            )
-
-        filter_summary_display = gr.HTML()
-
-        gr.Markdown(
-            "## Here's what I found for you!!"
-        )
-
-        results_display = gr.HTML()
-
-
-    # ========================================================
-    # WIRING
-    # ========================================================
-
-    find_button.click(
-        fn=handle_find_food,
-        inputs=[
-            location,
-            meal,
-            price,
-            cuisine,
-            dietary,
-            vibe
-        ],
-        outputs=[
-            screen1,
-            screen2,
-            filter_summary_display,
-            results_display
-        ]
-    )
-
-    edit_filters_button.click(
-        fn=handle_edit_filters,
-        inputs=[],
-        outputs=[
-            screen1,
-            screen2
-        ]
-    )
-
-
-# ============================================================
-# LAUNCH
-# ============================================================
-
-demo.launch()
