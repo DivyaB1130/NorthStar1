@@ -99,6 +99,7 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
 def respond(message,history): 
+    yield "Thinking..."  # shows immediately while the slower steps run
     preferences = extract_preferences(message)    
     if not preferences.get("destination_city"):
         northstar_chunks = []
@@ -107,6 +108,17 @@ def respond(message,history):
     else:
         # default to food if intent is food or unclear
         northstar_chunks = get_food_recommendations(city=preferences["destination_city"],price=preferences.get("price"))
+    system_instruction = (
+        f"You are NorthStar*, a friendly AI travel guide for food and activities. The user is looking for: {preferences.get('meal', 'a meal')}. "
+        "From the places listed below, prioritize and highlight the ones that genuinely make sense "
+        "for that time of day (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
+        "Structure your recommendations clearly with the address, budget, why they fit the user's request, and tips. "
+        f"Here is live data to pull from: {northstar_chunks}... "
+        "When recommending places to go in a city or activities to do in a place, if exact pricing isn't available in the data provided, "
+        "give the user a general sense of expected cost based on the type of place "
+        "(e.g., 'most public parks are free', 'museums typically charge an entrance fee, "
+        "check their site for current pricing') rather than stating a specific number you're unsure of."
+    )
         
     system_instruction = (f"You are NorthStar*, a friendly AI travel guide for food and activities. The user is looking for: {preferences.get('meal', 'a meal')}." 
         "From the places listed below, prioritize and highlight the ones that genuinely make sense for that time of day (e.g., a coffee shop or bakery fits breakfast better than a steakhouse)."
@@ -123,8 +135,14 @@ def respond(message,history):
     messages.append({"role":"user","content":message})
     
     #get the answer and launching the app
-    response = client.chat_completion(messages, max_tokens=200, temperature=0.3)
-    return response.choices[0].message.content.strip()
+    stream = client.chat_completion(messages, max_tokens=200, temperature=0.2, stream=True)
+
+    partial_response = ""
+    for chunk in stream:
+        token = chunk.choices[0].delta.content
+        if token:
+            partial_response += token
+            yield partial_response
 
 chatbot = gr.ChatInterface(
     respond,
