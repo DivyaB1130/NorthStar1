@@ -117,8 +117,9 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
     yield "Thinking...", conversation_state # shows immediately while the slower steps run
     preferences = extract_preferences(message)   
     # Fall back to the remembered city/intent from state if this message didn't mention one
-    city = preferences.get("destination_city") or preferences.get("current_location") or conversation_state.get("city")
+    city = preferences.get("destination_city") or preferences.get("current_location") or location or conversation_state.get("city")
     intent = preferences.get("intent") or conversation_state.get("intent") or "food"
+    meal = (", ".join(meals) if meals else None) or preferences.get("meal") or "a meal"
     drink_note = f" They'd also like a {', '.join(drinks)}." if drinks else ""
     greeting_name = name.strip() if name else "there"
 
@@ -132,7 +133,7 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
 
     if not city:
         northstar_chunks = []
-    elif "intent" == "activities":
+    elif intent == "activities":
         northstar_chunks = get_activity_recommendations(city=city)
     else:
         # default to food if intent is food or unclear
@@ -145,17 +146,15 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
         results_text = "No results available. Do not invent any places — tell the user you don't have data for this yet."
     
     system_instruction = (
-        "You are NorthStar*, a friendly AI travel guide for food and activities. If you don't know the user's location yet, ask for it. "
-        f"The user is looking for: {preferences.get('meal', 'a meal')}. "
+        "You are NorthStar*, a friendly AI travel guide for food and activities. "
+        f"The user's name is {greeting_name}.{drink_note} "
+        f"The user is looking for: {meal}. "
         "From the places listed below, prioritize five that genuinely fit the meal or activity type. "
-        "for type of meal (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
         "Structure your recommendations clearly with the address, budget range, why they fit the user's request, and tips. "
-        f"NEVER invent a place that isn't in this data. Here is live data to pull from: {results_text}"
-        #using page instead of northstar chunks because we want it to see only 5 results first
-        "When recommending places to go in a city or activities to do in a place, if exact pricing isn't available in the data provided, "
-        "give the user a general sense of expected cost based on the type of place "
-        "(e.g., 'most public parks are free', 'museums typically charge an entrance fee, "
-        "check their site for current pricing') rather than stating a specific number you're unsure of."
+        f"NEVER invent a place that isn't in this data. Here is live data to pull from: {results_text} "
+        "When recommending places, if exact pricing isn't available, give a general sense of expected cost "
+        "(e.g., 'most public parks are free', 'museums typically charge an entrance fee, check their site for current pricing') "
+        "rather than stating a specific number you're unsure of."
     )
            
     #managing the conversation memory
