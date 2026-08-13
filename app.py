@@ -54,7 +54,7 @@ def get_food_recommendations(city, price=None, limit=50):
     
     if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
         retry_after = response.headers.get("Retry-After", "unknown")
-        print(f"Rate limited — retry after: {retry_after} seconds")
+        print(f"Rate limited — retry after: {retry_after} seconds. Response text: {response.text}")
         return []        
 
     response.raise_for_status()
@@ -97,7 +97,7 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
     response = requests.get(url, headers=headers, params=params, timeout=10)
     if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
         retry_after = response.headers.get("Retry-After", "unknown")
-        print(f"Rate limited — retry after: {retry_after} seconds")
+        print(f"Rate limited — retry after: {retry_after} seconds". Response text: {response.text})
         return []     
 
     response.raise_for_status()
@@ -190,14 +190,24 @@ name_input = gr.Textbox(label="Your name", placeholder="e.g. Alex")
 location_input = gr.Textbox(label="Your current location", placeholder="e.g. Austin, TX")
 meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"],label="Meal of the day")
 drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"],label="Drink (optional)")
+custom_css = """
+.gradio-container {
+    background-color: #FAF7F2;
+}
+label {
+    font-weight: 600;
+    color: #3A3A3A;
+}
+"""
 
 conversation_state = gr.State(None)  # renamed from results_offset for clarity, since it's holding more than just an offset now
 chatbot = gr.ChatInterface(
     respond,
     additional_inputs=[name_input, location_input, meal_input, drink_input, conversation_state],
     additional_outputs=[conversation_state],
-    title="NorthStar",
-    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
+    title="🧭 NorthStar",
+    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?",
+    custom_css
 )
 chatbot.launch()
 
