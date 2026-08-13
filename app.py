@@ -207,7 +207,7 @@ chatbot = gr.ChatInterface(
     additional_outputs=[conversation_state],
     title="🧭 NorthStar",
     description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?",
-    custom_css
+    css=custom_css
 )
 chatbot.launch()
 
