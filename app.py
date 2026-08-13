@@ -134,7 +134,7 @@ def respond(message,history, results_offset):
 
     if not page:
         yield "That's all the options I have for this city right now!", results_offset
-        return
+    
     system_instruction = (
         "You are NorthStar*, a friendly AI travel guide for food and activities. Ask the user for their location if not"
         "already provided so you can make recommendations based on their location."
