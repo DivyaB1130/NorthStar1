@@ -131,16 +131,13 @@ def respond(message,history, results_offset):
         results_offset = 0  # a new city/search resets back to the beginning
 
     page = northstar_chunks[results_offset : results_offset + 10]
-
-    if not page:
-        yield "That's all the options I have for this city right now!", results_offset
     
     system_instruction = (
         "You are NorthStar*, a friendly AI travel guide for food and activities. Ask the user for their location if not"
         "already provided so you can make recommendations based on their location."
         f"The user is looking for: {preferences.get('meal', 'a meal')}. "
         "From the places listed below, prioritize and highlight the ones that genuinely make sense "
-        "for that time of day (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
+        "for type of meal (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
         "Structure your recommendations clearly with the address, budget range, why they fit the user's request, and tips. "
         f"Don't make up places to go. Here is live data to pull from: {page}... " 
         #using page instead of northstar chunks because we want it to see only 10 results first
