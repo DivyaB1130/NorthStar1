@@ -18,22 +18,16 @@ def extract_preferences(message):
         preferences = json.loads(raw)
   #if for any reason it doesn't covert, fall back to default(all fields empty) so the whole code doesn't stop
     except json.JSONDecodeError:
-        preferences = {"destination_city": None, "price": None, "meal": None} 
+        preferences = {"destination_city": None, "price": None, "meal": None, "current_location":None, "intent":None} 
     return preferences
     
-api_call_count = 0 #the number of times the chatbot makes a call
-MAX_CALLS_PER_SESSION = 20 
 recommendation_cache = {}  #storage
-def get_food_recommendations(city, price=None, limit=30):
+def get_food_recommendations(city, price=None, limit=50):
     cache_key = f"{city.strip().lower()}_{price}_{limit}"
     if cache_key in recommendation_cache:
         print(f"Using cached results for '{city}' — no API call made.")
         return recommendation_cache[cache_key]
         
-    global api_call_count #for keeping track of the number of calls
-    if api_call_count >= MAX_CALLS_PER_SESSION: #to limit number of calls per user
-        print("Session call limit reached.")
-        return []
     url = "https://places-api.foursquare.com/places/search"
     headers = {#identifies us when we go to the url
         "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
@@ -50,11 +44,12 @@ def get_food_recommendations(city, price=None, limit=30):
         "fields": "name,location,categories,price",
         "limit": limit,
     }
-    if price:
-        params["min_price"] = price
-        params["max_price"] = price
+    #if price:
+        #params["min_price"] = price
+        #params["max_price"] = price
+    #This wasn't doing anything so I commented it out
 
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params, timeout=10)
     
     if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
         print("Rate limited — wait a bit before trying again.")
@@ -63,7 +58,6 @@ def get_food_recommendations(city, price=None, limit=30):
     response.raise_for_status()
     results = response.json().get("results", [])
 
-    api_call_count += 1 #updating number of calls
     chunks = []
     for place in results: #organising all the info we got
         name = place.get("name", "Unknown")
@@ -75,16 +69,12 @@ def get_food_recommendations(city, price=None, limit=30):
     return chunks
     
 attraction_cache = {} #storage
-def get_activity_recommendations(city, limit=30):
+def get_activity_recommendations(city, limit=50):
     cache_key = f"{city.strip().lower()}_{limit}"
     if cache_key in attraction_cache:
         print(f"Using cached results for '{city}' — no API call made.")
         return attraction_cache[cache_key]
 
-    global api_call_count #for tracking number of calls
-    if api_call_count >= MAX_CALLS_PER_SESSION: #to limit calls per user
-        print("Session call limit reached.")
-        return []
     url = "https://places-api.foursquare.com/places/search"
     headers = { #identifies us when we vist the url to pull info
         "Authorization": f"Bearer {FOURSQUARE_API_KEY}",
@@ -102,14 +92,13 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
         "limit": limit,
     }
     
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params, timeout=10)
     if response.status_code == 429: #if there have been too many pull requests
         print("Rate limited — wait a bit before trying again.")
         return []
     response.raise_for_status()
     results = response.json().get("results", [])
 
-    api_call_count += 1 #updating number of calls
     chunks = []
     for place in results: #organising all the info we got
         name = place.get("name", "Unknown")
@@ -122,30 +111,45 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
 
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
-def respond(message,history):
-    yield "Thinking..."  # shows immediately while the slower steps run
-    preferences = extract_preferences(message)    
-    if not preferences.get("destination_city"):
+def respond(message,history, results_offset):
+    yield "Thinking...", results_offset  # shows immediately while the slower steps run
+    preferences = extract_preferences(message)   
+    city = (preferences.get("destination_city") or preferences.get("current_location"))
+
+    if not city:
         northstar_chunks = []
     elif preferences.get("intent") == "activities":
-        northstar_chunks = get_activity_recommendations(city=preferences["destination_city"])
+        northstar_chunks = get_activity_recommendations(city=city)
     else:
         # default to food if intent is food or unclear
-        northstar_chunks = get_food_recommendations(city=preferences["destination_city"],price=preferences.get("price"))
+        northstar_chunks = get_food_recommendations(city=city,price=preferences.get("price"))
+    
+    # Deciding whether this is a "show me more" request or a fresh search
+    if "more" in message.lower() or "something else" in message.lower() or "other options" in message.lower():
+        results_offset += 10
+    else:
+        results_offset = 0  # a new city/search resets back to the beginning
+
+    page = northstar_chunks[results_offset : results_offset + 10]
+
+    if not page:
+        yield "That's all the options I have for this city right now!", results_offset
+        return
     system_instruction = (
         "You are NorthStar*, a friendly AI travel guide for food and activities. Ask the user for their location if not"
         "already provided so you can make recommendations based on their location."
         f"The user is looking for: {preferences.get('meal', 'a meal')}. "
         "From the places listed below, prioritize and highlight the ones that genuinely make sense "
         "for that time of day (e.g., a coffee shop or bakery fits breakfast better than a steakhouse). "
-        "Structure your recommendations clearly with the address, budget, why they fit the user's request, and tips. "
-        f"Here is live data to pull from: {northstar_chunks}... "
+        "Structure your recommendations clearly with the address, budget range, why they fit the user's request, and tips. "
+        f"Don't make up places to go. Here is live data to pull from: {page}... " 
+        #using page instead of northstar chunks because we want it to see only 10 results first
         "When recommending places to go in a city or activities to do in a place, if exact pricing isn't available in the data provided, "
         "give the user a general sense of expected cost based on the type of place "
         "(e.g., 'most public parks are free', 'museums typically charge an entrance fee, "
         "check their site for current pricing') rather than stating a specific number you're unsure of."
     )
-        
+           
     #managing the conversation memory
     messages = [{"role":"system","content": system_instruction}]
 
@@ -157,17 +161,20 @@ def respond(message,history):
     messages.append({"role":"user","content":message})
     
     #get the answer and launching the app
-    stream = client.chat_completion(messages, max_tokens=200, temperature=0.2, stream=True)
-
+    stream = client.chat_completion(messages, max_tokens=400, temperature=0.2, stream=True)
+    #gives the chatbot the appearance of typing
     partial_response = ""
     for chunk in stream:
         token = chunk.choices[0].delta.content
         if token:
             partial_response += token
-            yield partial_response
-
+            yield partial_response, results_offset
+            
+results_offset = gr.State({"offset":0, "city":None}) #keep track of conversation
 chatbot = gr.ChatInterface(
     respond,
+    additional_inputs=[results_offset],
+    additional_outputs=[results_offset],
     title="NorthStar",
     description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?",
     examples=["I'm craving some food", "I want to explore somewhere new"]
