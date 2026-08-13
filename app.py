@@ -10,6 +10,7 @@ def extract_preferences(message):
         "Extract the following from the user's message and return ONLY valid JSON.\n"
         "Fields: destination_city (string or null), current_location (string or null), price (integer 1-4 or null), meal (string or null),"
         "intent (one of: \"food\", \"activities\", or null if unclear).\n\n"
+        "wants_more (true if the user is asking for different/additional/other recommendations, otherwise false).\n\n"
         f"User message: \"{message}\"\n\nJSON:"
     )
     
@@ -119,12 +120,13 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
     preferences = extract_preferences(message)   
     # Fall back to the remembered city/intent from state if this message didn't mention one
     city = preferences.get("destination_city") or preferences.get("current_location") or location or conversation_state.get("city")
+    print(f"DEBUG — location box value: '{location}' | resolved city: '{city}'") #trying to check something
     intent = preferences.get("intent") or conversation_state.get("intent") or "food"
     meal = (", ".join(meals) if meals else None) or preferences.get("meal") or "a meal"
     drink_note = f" They'd also like a {', '.join(drinks)}." if drinks else ""
     greeting_name = name.strip() if name else "there"
 
-    wants_more = any(kw in message.lower() for kw in ["more", "something else", "other options", "different"])
+    wants_more = preferences.get("wants_more", False)
 
     # Only advance the offset if it's a "more" request for the SAME city — a new city always resets to page 1
     if wants_more and city == conversation_state.get("city"):
@@ -170,7 +172,7 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
     messages.append({"role":"user","content":message})
     
     #get the answer and launching the app
-    stream = client.chat_completion(messages, max_tokens=500, temperature=0.2, stream=True)
+    stream = client.chat_completion(messages, max_tokens=600, temperature=0.2, stream=True)
     #gives the chatbot the appearance of typing
     partial_response = ""
     for chunk in stream:
@@ -184,13 +186,24 @@ location_input = gr.Textbox(label="Your current location", placeholder="e.g. Aus
 meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"],label="Meal of the day")
 drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"],label="Drink (optional)")
 
+custom_css = """
+.gradio-container {
+    background-color: #FAF7F2;
+}
+label {
+    font-weight: 600;
+    color: #3A3A3A;
+}
+"""
 conversation_state = gr.State(None)  # renamed from results_offset for clarity, since it's holding more than just an offset now
 chatbot = gr.ChatInterface(
     respond,
     additional_inputs=[name_input, location_input, meal_input, drink_input, conversation_state],
     additional_outputs=[conversation_state],
     title="NorthStar",
-    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
+    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?",
+    theme=gr.themes.Soft(primary_hue="orange"),
+    css=custom_css
 )
 chatbot.launch()
 
