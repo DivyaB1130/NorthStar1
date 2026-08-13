@@ -1,6 +1,7 @@
 import gradio as gr
 import os
 import json
+import requests
 from huggingface_hub import InferenceClient
 FOURSQUARE_API_KEY = os.environ.get("FOURSQUARE_API_KEY")
 
@@ -140,6 +141,7 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
         northstar_chunks = get_food_recommendations(city=city,price=preferences.get("price"))
 
     page = northstar_chunks[offset : offset + 5] # Save everything back into state for next turn
+    conversation_state = {"offset": offset, "city": city, "intent": intent}
     if page:
         results_text = str(page)
     else:
