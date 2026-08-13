@@ -176,8 +176,7 @@ chatbot = gr.ChatInterface(
     additional_inputs=[results_offset],
     additional_outputs=[results_offset],
     title="NorthStar",
-    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?",
-    examples=["I'm craving some food", "I want to explore somewhere new"]
+    description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
 )
 chatbot.launch()
 
