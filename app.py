@@ -217,35 +217,35 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="orange")) as ch
     msg_input = gr.Textbox(label="Your message", placeholder="What are you craving?")
     send_button = gr.Button("Send")
 
-def user_submit(message, chat_history):
-        chat_history = chat_history or []
-        chat_history.append([message, None])
-        return "", chat_history
-
-def bot_reply(chat_history, name, location, meals, drinks, conversation_state):
-    message = chat_history[-1][0]
-    raw_history = chat_history[:-1]
+    def user_submit(message, chat_history):
+            chat_history = chat_history or []
+            chat_history.append([message, None])
+            return "", chat_history
     
-    # Convert Gradio's [user, bot] pairs into role/content dicts respond() expects
-    history_for_llm = []
-    for user_msg, bot_msg in raw_history:
-        if user_msg:
-            history_for_llm.append({"role": "user", "content": user_msg})
-        if bot_msg:
-            history_for_llm.append({"role": "assistant", "content": bot_msg})
-    
-    for partial, new_state in respond(message, history_for_llm, name, location, meals, drinks, conversation_state):
-        chat_history[-1][1] = partial
-        yield chat_history, new_state
+    def bot_reply(chat_history, name, location, meals, drinks, conversation_state):
+        message = chat_history[-1][0]
+        raw_history = chat_history[:-1]
+        
+        # Convert Gradio's [user, bot] pairs into role/content dicts respond() expects
+        history_for_llm = []
+        for user_msg, bot_msg in raw_history:
+            if user_msg:
+                history_for_llm.append({"role": "user", "content": user_msg})
+            if bot_msg:
+                history_for_llm.append({"role": "assistant", "content": bot_msg})
+        
+        for partial, new_state in respond(message, history_for_llm, name, location, meals, drinks, conversation_state):
+            chat_history[-1][1] = partial
+            yield chat_history, new_state
 
-msg_input.submit(user_submit, [msg_input, chat_display], [msg_input, chat_display]).then(
-    bot_reply, [chat_display, name_input, location_input, meal_input, drink_input, conversation_state],
-    [chat_display, conversation_state]
-)
-send_button.click(user_submit, [msg_input, chat_display], [msg_input, chat_display]).then(
-    bot_reply, [chat_display, name_input, location_input, meal_input, drink_input, conversation_state],
-    [chat_display, conversation_state]
-)
+    msg_input.submit(user_submit, [msg_input, chat_display], [msg_input, chat_display]).then(
+        bot_reply, [chat_display, name_input, location_input, meal_input, drink_input, conversation_state],
+        [chat_display, conversation_state]
+    )
+    send_button.click(user_submit, [msg_input, chat_display], [msg_input, chat_display]).then(
+        bot_reply, [chat_display, name_input, location_input, meal_input, drink_input, conversation_state],
+        [chat_display, conversation_state]
+    )
 
 '''
 conversation_state = gr.State(None)  # renamed from results_offset for clarity, since it's holding more than just an offset now
@@ -257,5 +257,5 @@ chatbot = gr.ChatInterface(
     description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
 ) #commenting all this out while i try the style changes
 ''' 
-chatbot.launch()
+chatbot.launch(theme=gr.themes.Soft(primary_hue="orange"), css=custom_css)
 
