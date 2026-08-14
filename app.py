@@ -198,7 +198,7 @@ label {
 """
 with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="blue")) as chatbot:
     
-    gr.Image("Northstar_logo.png", show_label=False, container=False, height=120)
+    gr.Image("Northstar_logo.png", show_label=False, container=False, height=250)
     
     gr.Markdown("# NorthStar")
     gr.Markdown("Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed.")
@@ -210,13 +210,13 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="blue")) as chat
     with gr.Row():
         meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"], label="Meal of the day")
         drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"], label="Drink (optional)")
+
+    send_button = gr.Button("Send")
     
     conversation_state = gr.State(None)
-    
     chat_display = gr.Chatbot(label="NorthStar Chat")
-    msg_input = gr.Textbox(label="Your message", placeholder="What are you craving?")
-    send_button = gr.Button("Send")
-
+    msg_input = gr.Textbox(label="Your message", placeholder="Tell me want you want then press enter")
+    
     def user_submit(message, chat_history):
         chat_history = chat_history or []
         chat_history.append({"role": "user", "content": message})
