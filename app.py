@@ -45,11 +45,6 @@ def get_food_recommendations(city, price=None, limit=50):
         "fields": "name,location,categories,price",
         "limit": limit,
     }
-    #if price:
-        #params["min_price"] = price
-        #params["max_price"] = price
-    #This wasn't doing anything so I commented it out
-
     response = requests.get(url, headers=headers, params=params, timeout=10)
     
     if response.status_code == 429:#lets us know if there have beeen too many pull requests instead of just crashing
@@ -115,7 +110,7 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
 
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
-def respond(message, history, name, location, meals, drinks,conversation_state):
+def respond(message, history_for_llm, name, location, meals, drinks, conversation_state):
     if conversation_state is None:
         conversation_state = {"offset": 0, "city": None, "intent": None}
     yield "Thinking...", conversation_state # shows immediately while the slower steps run
@@ -170,8 +165,8 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
     messages = [{"role":"system","content": system_instruction}]
 
     #include past conversation logs
-    if history:
-        messages.extend(history)
+    if history_for_llm:
+        messages.extend(history_for_llm)
 
     #include the current user message
     messages.append({"role":"user","content":message})
@@ -186,11 +181,73 @@ def respond(message, history, name, location, meals, drinks,conversation_state):
             partial_response += token
             yield partial_response, conversation_state
 
+''' #commenting this out for now
 name_input = gr.Textbox(label="Your name", placeholder="e.g. Alex")
 location_input = gr.Textbox(label="Your current location", placeholder="e.g. Austin, TX")
 meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"],label="Meal of the day")
 drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"],label="Drink (optional)")
+'''
+custom_css = """
+.gradio-container {
+    background-color: #FAF7F2;
+}
+label {
+    font-weight: 600;
+    color: #3A3A3A;
+}
+"""
+with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="orange")) as chatbot:
+    
+    gr.Image("northstar_logo.png", show_label=False, container=False, height=120)
+    
+    gr.Markdown("# NorthStar")
+    gr.Markdown("Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed.")
+    
+    with gr.Row():
+        name_input = gr.Textbox(label="Your name", placeholder="e.g. Alex")
+        location_input = gr.Textbox(label="Your current location", placeholder="e.g. Austin, TX")
+    
+    with gr.Row():
+        meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"], label="Meal of the day")
+        drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"], label="Drink (optional)")
+    
+    conversation_state = gr.State(None)
+    
+    chat_display = gr.Chatbot(label="NorthStar Chat")
+    msg_input = gr.Textbox(label="Your message", placeholder="What are you craving?")
+    send_button = gr.Button("Send")
 
+def user_submit(message, chat_history):
+        chat_history = chat_history or []
+        chat_history.append([message, None])
+        return "", chat_history
+
+def bot_reply(chat_history, name, location, meals, drinks, conversation_state):
+    message = chat_history[-1][0]
+    raw_history = chat_history[:-1]
+    
+    # Convert Gradio's [user, bot] pairs into role/content dicts respond() expects
+    history_for_llm = []
+    for user_msg, bot_msg in raw_history:
+        if user_msg:
+            history_for_llm.append({"role": "user", "content": user_msg})
+        if bot_msg:
+            history_for_llm.append({"role": "assistant", "content": bot_msg})
+    
+    for partial, new_state in respond(message, history_for_llm, name, location, meals, drinks, conversation_state):
+        chat_history[-1][1] = partial
+        yield chat_history, new_state
+
+msg_input.submit(user_submit, [msg_input, chat_display], [msg_input, chat_display]).then(
+    bot_reply, [chat_display, name_input, location_input, meal_input, drink_input, conversation_state],
+    [chat_display, conversation_state]
+)
+send_button.click(user_submit, [msg_input, chat_display], [msg_input, chat_display]).then(
+    bot_reply, [chat_display, name_input, location_input, meal_input, drink_input, conversation_state],
+    [chat_display, conversation_state]
+)
+
+'''
 conversation_state = gr.State(None)  # renamed from results_offset for clarity, since it's holding more than just an offset now
 chatbot = gr.ChatInterface(
     respond,
@@ -198,6 +255,7 @@ chatbot = gr.ChatInterface(
     additional_outputs=[conversation_state],
     title="🧭 NorthStar",
     description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
-)
+) #commenting all this out while i try the style changes
+''' 
 chatbot.launch()
 
