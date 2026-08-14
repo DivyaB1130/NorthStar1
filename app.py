@@ -218,10 +218,10 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="blue")) as chat
     send_button = gr.Button("Send")
 
     def user_submit(message, chat_history):
-    chat_history = chat_history or []
-    chat_history.append({"role": "user", "content": message})
-    chat_history.append({"role": "assistant", "content": ""})  # placeholder, filled in as the bot streams
-    return "", chat_history
+        chat_history = chat_history or []
+        chat_history.append({"role": "user", "content": message})
+        chat_history.append({"role": "assistant", "content": ""})  # placeholder, filled in as the bot streams
+        return "", chat_history
 
     def bot_reply(chat_history, name, location, meals, drinks, conversation_state):
         message = chat_history[-2]["content"]     # the user's message (second-to-last entry)
