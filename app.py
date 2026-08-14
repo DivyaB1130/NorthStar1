@@ -161,12 +161,12 @@ def respond(message, history_for_llm, name, location, meals, drinks, conversatio
 
     page = northstar_chunks[offset : offset + 5] # Save everything back into state for next turn
     conversation_state = {"offset": offset, "city": city, "intent": intent}
-    if page:
-        results_text = str(page)
-        data_status = "real"
-    else:
+    if not page:
         results_text = "No results available. Do not invent any places — tell the user you don't have data for this yet."
-    
+        data_status = "unavailable"
+    else:
+        results_text = str(page)
+ 
     system_instruction = (
     "You are NorthStar*, a friendly AI travel guide for food and activities. "
     f"The user's name is {greeting_name}.{drink_note} "
