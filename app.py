@@ -196,9 +196,9 @@ label {
     color: #3A3A3A;
 }
 """
-with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="orange")) as chatbot:
+with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="blue")) as chatbot:
     
-    gr.Image("northstar_logo.png", show_label=False, container=False, height=120)
+    gr.Image("Northstar_logo.png", show_label=False, container=False, height=120)
     
     gr.Markdown("# NorthStar")
     gr.Markdown("Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed.")
@@ -218,24 +218,17 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft(primary_hue="orange")) as ch
     send_button = gr.Button("Send")
 
     def user_submit(message, chat_history):
-            chat_history = chat_history or []
-            chat_history.append([message, None])
-            return "", chat_history
-    
+    chat_history = chat_history or []
+    chat_history.append({"role": "user", "content": message})
+    chat_history.append({"role": "assistant", "content": ""})  # placeholder, filled in as the bot streams
+    return "", chat_history
+
     def bot_reply(chat_history, name, location, meals, drinks, conversation_state):
-        message = chat_history[-1][0]
-        raw_history = chat_history[:-1]
-        
-        # Convert Gradio's [user, bot] pairs into role/content dicts respond() expects
-        history_for_llm = []
-        for user_msg, bot_msg in raw_history:
-            if user_msg:
-                history_for_llm.append({"role": "user", "content": user_msg})
-            if bot_msg:
-                history_for_llm.append({"role": "assistant", "content": bot_msg})
-        
+        message = chat_history[-2]["content"]     # the user's message (second-to-last entry)
+        history_for_llm = chat_history[:-2]        # everything before this exchange — already role/content shaped
+    
         for partial, new_state in respond(message, history_for_llm, name, location, meals, drinks, conversation_state):
-            chat_history[-1][1] = partial
+            chat_history[-1]["content"] = partial   # update the assistant placeholder's content
             yield chat_history, new_state
 
     msg_input.submit(user_submit, [msg_input, chat_display], [msg_input, chat_display]).then(
@@ -257,5 +250,5 @@ chatbot = gr.ChatInterface(
     description="Hi! I'm NorthStar — your guide to finding great food and things to do wherever you're headed. What are you in the mood for?"
 ) #commenting all this out while i try the style changes
 ''' 
-chatbot.launch(theme=gr.themes.Soft(primary_hue="orange"), css=custom_css)
+chatbot.launch(theme=gr.themes.Soft(primary_hue="blue"), css=custom_css)
 
