@@ -1,4 +1,5 @@
 import gradio as gr
+import pandas as pd
 import os
 import json
 import requests
@@ -108,6 +109,18 @@ foursquare category ids: 10000 -	Arts and Entertainment, 16000 - Landmarks and O
     attraction_cache[cache_key] = chunks #storing info here
     return chunks
 
+business_df = pd.read_json("yelp_academic_dataset_business.json", lines=True)
+for col in ["name", "city", "categories"]:
+    business_df[col] = business_df[col].fillna("")
+business_df["stars"] = business_df["stars"].fillna("No rating available")
+business_df = business_df[business_df["categories"].str.contains("Restaurant|Food", case=False, na=False)].copy()
+
+def get_static_recommendations(city, limit=50):
+    matches = business_df[business_df["city"].str.lower() == city.strip().lower()]
+    chunks = []
+    for _, row in matches.head(limit).iterrows():
+        chunks.append(f"Restaurant: {row['name']} | City: {row['city']} | Categories: {row['categories']} | Rating: {row['stars']}")
+    return chunks
 client = InferenceClient("Qwen/Qwen2.5-7B-Instruct", bill_to="kode-with-klossy")
 
 def respond(message, history_for_llm, name, location, meals, drinks, conversation_state):
@@ -133,11 +146,18 @@ def respond(message, history_for_llm, name, location, meals, drinks, conversatio
 
     if not city:
         northstar_chunks = []
+        data_status = "unavailable"
     elif intent == "activities":
         northstar_chunks = get_activity_recommendations(city=city)
+        data_status = "real" if northstar_chunks else "unavailable"
     else:
         # default to food if intent is food or unclear
         northstar_chunks = get_food_recommendations(city=city,price=preferences.get("price"))
+        if northstar_chunks:
+            data_status = "real"
+        else:
+            northstar_chunks = get_static_recommendations(city=city)
+            data_status = "static" if northstar_chunks else "unavailable"
 
     page = northstar_chunks[offset : offset + 5] # Save everything back into state for next turn
     conversation_state = {"offset": offset, "city": city, "intent": intent}
@@ -146,7 +166,6 @@ def respond(message, history_for_llm, name, location, meals, drinks, conversatio
         data_status = "real"
     else:
         results_text = "No results available. Do not invent any places — tell the user you don't have data for this yet."
-        data_status = "unavailable"
     
     system_instruction = (
     "You are NorthStar*, a friendly AI travel guide for food and activities. "
@@ -157,6 +176,9 @@ def respond(message, history_for_llm, name, location, meals, drinks, conversatio
     "and ask them to try again shortly — do NOT invent, brainstorm, or suggest any specific place names, addresses, or businesses. "
     "If the data status is 'real', recommend up to five places that genuinely fit the meal or activity type, using only what's listed below - "
     "if fewer than five relevant places are available in the data, only list the ones that are actually there. "
+    "If the data status is 'static', tell the user clearly that live results aren't available right now,"
+    "Ask them if they want to see saved reults. If they agree, make sure to tell them you're showing results from a saved dataset instead — mention it may not reflect current hours, prices, "
+    "or whether the business is still open, and suggest they check the restaurant's own website or search engine for up-to-date details."
     "Never invent additional places, branches, or variations. "
     f"Here is the live data (if any): {results_text}"
 )
@@ -181,12 +203,6 @@ def respond(message, history_for_llm, name, location, meals, drinks, conversatio
             partial_response += token
             yield partial_response, conversation_state
 
-''' #commenting this out for now
-name_input = gr.Textbox(label="Your name", placeholder="e.g. Alex")
-location_input = gr.Textbox(label="Your current location", placeholder="e.g. Austin, TX")
-meal_input = gr.CheckboxGroup(choices=["Breakfast", "Brunch", "Lunch", "Dinner", "Snack"],label="Meal of the day")
-drink_input = gr.CheckboxGroup(choices=["Coffee", "Soda", "Smoothie", "Tea"],label="Drink (optional)")
-'''
 custom_css = """
 .gradio-container {
     background-color: #FAF7F2;
